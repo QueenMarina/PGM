@@ -56,6 +56,7 @@ import tc.oc.pgm.api.match.MatchModule;
 import tc.oc.pgm.api.match.MatchScope;
 import tc.oc.pgm.api.party.Competitor;
 import tc.oc.pgm.api.player.MatchPlayer;
+import tc.oc.pgm.events.ListenerScope;
 import tc.oc.pgm.events.PlayerJoinMatchEvent;
 import tc.oc.pgm.util.nms.PlayerUtils;
 import tc.oc.pgm.util.bukkit.Sounds;
@@ -68,6 +69,7 @@ import tc.oc.pgm.util.material.Materials;
  * <p>This cannot fully stop Minecraft world ticks. Instead it tries to approximate "tick freeze"
  * for gameplay-affecting systems within the match world.
  */
+@ListenerScope(MatchScope.LOADED)
 public class PauseMatchModule implements MatchModule, Listener {
 
   private static final int RESUME_COUNTDOWN_SECONDS = 5;
@@ -88,12 +90,6 @@ public class PauseMatchModule implements MatchModule, Listener {
 
   public PauseMatchModule(Match match) {
     this.match = assertNotNull(match);
-  }
-
-  @Override
-  public void load() {
-    // Pausing is only meaningful in-match, but listeners can safely exist once the world is loaded.
-    match.addListener(this, MatchScope.LOADED);
   }
 
   @Override
@@ -118,12 +114,12 @@ public class PauseMatchModule implements MatchModule, Listener {
     cancelResumeCountdown();
 
     for (MatchPlayer player : match.getPlayers()) {
+      if (!shouldFreezeWhilePaused(player)) continue;
       enableFlightWhilePaused(player.getBukkit());
       snapshotEffectsWhilePaused(player.getBukkit());
-      if (!player.isFrozen()) {
-        player.setFrozen(true);
-        frozenByPause.add(player.getId());
-      }
+      if (player.isFrozen()) continue;
+      player.setFrozen(true);
+      frozenByPause.add(player.getId());
     }
 
     // Some effects (e.g., eating a golden apple) can be applied slightly after the command
@@ -131,6 +127,7 @@ public class PauseMatchModule implements MatchModule, Listener {
     Bukkit.getScheduler().runTask(PGM.get(), () -> {
       if (!paused) return;
       for (MatchPlayer player : match.getPlayers()) {
+        if (!shouldFreezeWhilePaused(player)) continue;
         refreshEffectsSnapshotWhilePaused(player.getBukkit());
       }
     });
@@ -185,7 +182,7 @@ public class PauseMatchModule implements MatchModule, Listener {
             .append(competitor.getName())
             .append(
                 Component.text(
-                    " requested a pause. Requests are valid for "
+                    " requested a pause. Type /pause to accept. Requests are valid for "
                         + REQUEST_EXPIRY_SECONDS
                         + " seconds and will expire if not accepted. "))
             .append(Component.text("(" + pauseRequests.size() + "/" + needed + ")"))
@@ -222,7 +219,7 @@ public class PauseMatchModule implements MatchModule, Listener {
             .append(competitor.getName())
             .append(
                 Component.text(
-                    " requested to resume. Requests are valid for "
+                    " requested to resume. Type /resume to accept. Requests are valid for "
                         + REQUEST_EXPIRY_SECONDS
                         + " seconds and will expire if not accepted. "))
             .append(Component.text("(" + resumeRequests.size() + "/" + needed + ")"))
@@ -349,12 +346,18 @@ public class PauseMatchModule implements MatchModule, Listener {
     if (event.getMatch() != match) return;
 
     MatchPlayer player = event.getPlayer();
+    if (!shouldFreezeWhilePaused(player)) return;
     enableFlightWhilePaused(player.getBukkit());
     snapshotEffectsWhilePaused(player.getBukkit());
     if (!player.isFrozen()) {
       player.setFrozen(true);
       frozenByPause.add(player.getId());
     }
+  }
+
+  private boolean shouldFreezeWhilePaused(MatchPlayer player) {
+    // Allow observers/spectators to keep moving while the match is paused.
+    return player != null && player.isParticipating();
   }
 
   private void enableFlightWhilePaused(Player bukkit) {

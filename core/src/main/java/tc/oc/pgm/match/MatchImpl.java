@@ -9,6 +9,7 @@ import com.google.common.collect.ImmutableMap;
 import java.io.File;
 import java.lang.ref.WeakReference;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -116,6 +117,8 @@ public class MatchImpl implements Match {
   private final AtomicReference<MatchPhase> state;
   private final AtomicLong start;
   private final AtomicLong end;
+  private final AtomicReference<Instant> startInstant;
+  private final AtomicReference<Instant> endInstant;
   private final AtomicInteger capacity;
   private final EnumMap<MatchScope, ScheduledExecutorService> executors;
   private final EnumMap<MatchScope, Collection<Listener>> listeners;
@@ -147,6 +150,8 @@ public class MatchImpl implements Match {
     this.state = new AtomicReference<>(MatchPhase.IDLE);
     this.start = new AtomicLong(0);
     this.end = new AtomicLong(0);
+    this.startInstant = new AtomicReference<>(null);
+    this.endInstant = new AtomicReference<>(null);
     this.capacity = new AtomicInteger(
         map.getInfo().getMaxPlayers().stream().mapToInt(i -> i).sum());
     this.executors = new EnumMap<>(MatchScope.class);
@@ -207,11 +212,13 @@ public class MatchImpl implements Match {
         case RUNNING:
           getModules().forEach(MatchModule::enable);
           start.set(System.currentTimeMillis());
+          startInstant.set(getTick().instant);
           startListeners(MatchScope.RUNNING);
           startTickables(MatchScope.RUNNING);
           callEvent(new MatchStartEvent(this));
           break;
         case FINISHED:
+          endInstant.set(getTick().instant);
           winners.invalidateRanking();
           getExecutor(MatchScope.RUNNING).shutdownNow();
           getCountdown().cancelAll();
@@ -743,17 +750,14 @@ public class MatchImpl implements Match {
 
   @Override
   public Duration getDuration() {
-    long start = this.start.get();
-    if (start <= 0) {
+    Instant start = this.startInstant.get();
+    if (start == null) {
       return Duration.ZERO;
     }
 
-    long end = this.end.get();
-    if (end <= 0) {
-      end = System.currentTimeMillis();
-    }
-
-    return Duration.ofMillis(end - start);
+    Instant end = this.endInstant.get();
+    Instant now = end == null ? getTick().instant : end;
+    return Duration.between(start, now);
   }
 
   @Override
@@ -768,6 +772,7 @@ public class MatchImpl implements Match {
 
   private class TickableTask implements Runnable {
     private final MatchScope scope;
+    private Tick lastTick;
 
     private TickableTask(MatchScope scope) {
       this.scope = assertNotNull(scope);
@@ -776,6 +781,9 @@ public class MatchImpl implements Match {
     @Override
     public void run() {
       final Tick tick = getTick();
+      if (tick == lastTick) return;
+      lastTick = tick;
+
       for (Tickable tickable : MatchImpl.this.tickables.get(scope)) {
         try {
           tickable.tick(MatchImpl.this, tick);

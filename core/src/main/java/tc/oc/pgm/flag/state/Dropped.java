@@ -4,7 +4,6 @@ import static net.kyori.adventure.text.Component.text;
 import static net.kyori.adventure.text.Component.translatable;
 
 import java.time.Duration;
-import java.time.Instant;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
@@ -105,7 +104,8 @@ public class Dropped extends Uncarried implements Missing {
   @Override
   protected boolean canPickup(MatchPlayer player) {
     return super.canPickup(player)
-        && (player != this.dropper || this.enterTime.plus(PICKUP_DELAY).isBefore(Instant.now()));
+        && (player != this.dropper
+            || this.enterTime.plus(PICKUP_DELAY).isBefore(this.flag.getMatch().getTick().instant));
   }
 
   @Override

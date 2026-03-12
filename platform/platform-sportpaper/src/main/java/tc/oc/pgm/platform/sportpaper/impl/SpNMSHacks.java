@@ -8,18 +8,24 @@ import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
+import net.minecraft.server.v1_8_R3.BlockPosition;
 import net.minecraft.server.v1_8_R3.ChunkSection;
+import net.minecraft.server.v1_8_R3.DataWatcher;
 import net.minecraft.server.v1_8_R3.EntityArrow;
 import net.minecraft.server.v1_8_R3.EntityFireball;
 import net.minecraft.server.v1_8_R3.EntityFireworks;
 import net.minecraft.server.v1_8_R3.IBlockData;
 import net.minecraft.server.v1_8_R3.IDataManager;
 import net.minecraft.server.v1_8_R3.NBTTagCompound;
+import net.minecraft.server.v1_8_R3.PacketPlayOutEntityMetadata;
+import net.minecraft.server.v1_8_R3.PacketPlayOutSpawnEntity;
 import net.minecraft.server.v1_8_R3.ServerNBTManager;
 import net.minecraft.server.v1_8_R3.WorldData;
 import net.minecraft.server.v1_8_R3.WorldServer;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.WorldCreator;
@@ -32,6 +38,7 @@ import org.bukkit.craftbukkit.v1_8_R3.entity.CraftFirework;
 import org.bukkit.craftbukkit.v1_8_R3.entity.CraftItem;
 import org.bukkit.craftbukkit.v1_8_R3.entity.CraftPlayer;
 import org.bukkit.craftbukkit.v1_8_R3.util.CraftMagicNumbers;
+import org.bukkit.craftbukkit.v1_8_R3.inventory.CraftItemStack;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Fireball;
 import org.bukkit.entity.Firework;
@@ -43,8 +50,10 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
+import tc.oc.pgm.platform.sportpaper.packets.SpPacket;
 import tc.oc.pgm.util.chunk.NullChunkGenerator;
 import tc.oc.pgm.util.material.BlockMaterialData;
+import tc.oc.pgm.util.material.Materials;
 import tc.oc.pgm.util.nms.NMSHacks;
 import tc.oc.pgm.util.platform.Supports;
 import tc.oc.pgm.util.reflect.ReflectionUtils;
@@ -88,6 +97,30 @@ public class SpNMSHacks implements NMSHacks {
   @Override
   public long getMonotonicTime(World world) {
     return ((CraftWorld) world).getHandle().getTime();
+  }
+
+  @Override
+  public void scheduleFluidTick(Block block) {
+    if (block == null) return;
+    var type = block.getType();
+    if (!(type == Material.WATER
+        || type == Materials.STILL_WATER
+        || type == Material.LAVA
+        || type == Materials.STILL_LAVA)) {
+      return;
+    }
+
+    WorldServer world = ((CraftWorld) block.getWorld()).getHandle();
+    net.minecraft.server.v1_8_R3.Block nmsBlock = CraftMagicNumbers.getBlock(type);
+    if (nmsBlock == null) return;
+
+    BlockPosition pos = new BlockPosition(block.getX(), block.getY(), block.getZ());
+
+    // Best-effort: wake both the tick scheduler and neighbor/physics propagation.
+    world.applyPhysics(pos, nmsBlock);
+    world.update(pos, nmsBlock);
+    world.notify(pos);
+    world.a(pos, nmsBlock, 1);
   }
 
   @Override
@@ -228,5 +261,63 @@ public class SpNMSHacks implements NMSHacks {
   @Override
   public int allocateEntityId() {
     return Bukkit.allocateEntityId();
+  }
+
+  @Override
+  public int[] spawnClientSideItemBurst(
+      Player viewer, Location center, ItemStack item, int count, double radius, double speed) {
+    if (viewer == null || center == null || item == null) return new int[0];
+    if (count <= 0) return new int[0];
+
+    // Object type id for item entities in 1.8 spawn packets.
+    final int ITEM_ENTITY_TYPE = 2;
+
+    int[] ids = new int[count];
+    final ThreadLocalRandom rnd = ThreadLocalRandom.current();
+
+    // Metadata index for the carried item stack on EntityItem.
+    final int ITEMSTACK_WATCHER = 10;
+    final var nmsStack = CraftItemStack.asNMSCopy(item);
+
+    for (int i = 0; i < count; i++) {
+      int entityId = allocateEntityId();
+      ids[i] = entityId;
+
+      double angle = rnd.nextDouble(0, Math.PI * 2);
+      double r = rnd.nextDouble(0, Math.max(0.01, radius));
+      double dx = Math.cos(angle) * r;
+      double dz = Math.sin(angle) * r;
+
+      double x = center.getX() + dx;
+      double y = center.getY() + rnd.nextDouble(0.2, 1.2);
+      double z = center.getZ() + dz;
+
+      double vx = dx * 0.35 + rnd.nextDouble(-0.03, 0.03);
+      double vz = dz * 0.35 + rnd.nextDouble(-0.03, 0.03);
+      double vy = rnd.nextDouble(speed * 0.6, speed);
+
+      PacketPlayOutSpawnEntity spawn =
+          new PacketPlayOutSpawnEntity(
+              entityId,
+              x,
+              y,
+              z,
+              (int) (vx * 8000),
+              (int) (vy * 8000),
+              (int) (vz * 8000),
+              0,
+              0,
+              ITEM_ENTITY_TYPE,
+              1);
+
+      DataWatcher watcher = new DataWatcher(null);
+      watcher.a(ITEMSTACK_WATCHER, nmsStack);
+      PacketPlayOutEntityMetadata meta = new PacketPlayOutEntityMetadata(entityId, watcher, true);
+
+      new SpPacket<>(spawn).send(viewer);
+      new SpPacket<>(meta).send(viewer);
+    }
+
+    return ids;
   }
 }

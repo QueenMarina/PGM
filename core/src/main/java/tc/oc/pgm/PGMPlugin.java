@@ -60,8 +60,13 @@ import tc.oc.pgm.map.MapLibraryImpl;
 import tc.oc.pgm.map.includes.MapIncludeProcessorImpl;
 import tc.oc.pgm.match.MatchManagerImpl;
 import tc.oc.pgm.namedecorations.ConfigDecorationProvider;
+import tc.oc.pgm.namedecorations.CustomRankDecorationProvider;
+import tc.oc.pgm.namedecorations.CustomRankService;
+import tc.oc.pgm.namedecorations.CombinedDecorationProvider;
 import tc.oc.pgm.namedecorations.NameDecorationRegistry;
 import tc.oc.pgm.namedecorations.NameDecorationRegistryImpl;
+import tc.oc.pgm.hotbar.HotbarLayoutService;
+import tc.oc.pgm.raindrops.RaindropsService;
 import tc.oc.pgm.restart.RestartListener;
 import tc.oc.pgm.restart.ShouldRestartTask;
 import tc.oc.pgm.rotation.MapPoolManager;
@@ -207,8 +212,13 @@ public class PGMPlugin extends JavaPlugin implements PGM, Listener {
       }
     }
 
+    CustomRankService rankService = CustomRankService.init(this);
+    RaindropsService.init(this);
+    HotbarLayoutService.init(this);
+    var baseProvider = config.getGroups().isEmpty() ? null : new ConfigDecorationProvider();
+    var rankProvider = new CustomRankDecorationProvider(rankService);
     nameDecorationRegistry = new NameDecorationRegistryImpl(
-        config.getGroups().isEmpty() ? null : new ConfigDecorationProvider());
+        new CombinedDecorationProvider(baseProvider, rankProvider));
 
     // Sometimes match folders need to be cleaned up if the server previously crashed
     final File[] worldDirs = getServer().getWorldContainer().listFiles();

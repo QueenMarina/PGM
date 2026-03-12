@@ -121,6 +121,19 @@ public class ModernNMSHacks implements NMSHacks {
   }
 
   @Override
+  public void scheduleFluidTick(Block block) {
+    if (block == null) return;
+    ServerLevel level = ((CraftWorld) block.getWorld()).getHandle();
+
+    var pos = new net.minecraft.core.BlockPos(block.getX(), block.getY(), block.getZ());
+    var fluidState = level.getFluidState(pos);
+    if (fluidState.isEmpty()) return;
+
+    // Schedule asap; this is best-effort and should be safe to call redundantly.
+    level.scheduleTick(pos, fluidState.getType(), 1);
+  }
+
+  @Override
   public void resumeServer() {
     // no-op, server pausing is sportpaper-specific
   }

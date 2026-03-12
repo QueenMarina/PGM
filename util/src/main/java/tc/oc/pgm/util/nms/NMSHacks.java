@@ -3,6 +3,7 @@ package tc.oc.pgm.util.nms;
 import java.util.List;
 import java.util.UUID;
 import org.bukkit.Chunk;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
@@ -12,6 +13,7 @@ import org.bukkit.entity.Firework;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerPickupItemEvent;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.SkullMeta;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Vector;
@@ -56,5 +58,27 @@ public interface NMSHacks {
 
   int getMaxWorldSize(World world);
 
+  /**
+   * (Best-effort) nudge for the server's fluid tick scheduler to re-run updates at/around the given
+   * block position.
+   *
+   * <p>This is useful when a plugin cancels flow/physics events and wants fluids to resume
+   * immediately after the cancellation stops.
+   */
+  void scheduleFluidTick(Block block);
+
   int allocateEntityId();
+
+  /**
+   * Spawn a short-lived burst of item entities that are only visible to {@code viewer}.
+   *
+   * <p>This is used for cosmetic "reward" effects; items are client-side only and therefore
+   * unpickable. The caller is responsible for destroying them (e.g. after ~20 ticks).
+   *
+   * @return the spawned client-side entity IDs (may be empty on unsupported platforms)
+   */
+  default int[] spawnClientSideItemBurst(
+      Player viewer, Location center, ItemStack item, int count, double radius, double speed) {
+    return new int[0];
+  }
 }

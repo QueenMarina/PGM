@@ -37,6 +37,10 @@ public interface Permissions {
   String MUTE = ROOT + ".mute"; // Access to the /mute command
   String BAN = ROOT + ".ban"; // Access to the /ban command
   String FREEZE = ROOT + ".freeze"; // Access to the /freeze command
+  String PAUSE = ROOT + ".pause"; // Access to /pause and /resume
+  String PRESERVE_HOTBAR_ORDER =
+      ROOT + ".preservehotbarorder"; // Access to global /preservehotbarorder enable|disable
+  String RANK = ROOT + ".rank"; // Access to /rank (custom rank decorators)
   String VANISH = ROOT + ".vanish"; // Access to /vanish command
   String VIEW_INVENTORY =
       ROOT + ".inventory"; // Access to /inventory and can click on players to see their inventory
@@ -85,6 +89,8 @@ public interface Permissions {
           .put(MUTE, true)
           .put(BAN, true)
           .put(FREEZE, true)
+          .put(PAUSE, true)
+          .put(RANK, true)
           .put(VANISH, true)
           .build());
 
@@ -107,8 +113,12 @@ public interface Permissions {
           .put(DEVELOPER.getName(), true)
           .build());
 
+  Permission PRESERVE_HOTBAR_ORDER_PERMISSION =
+      new Permission(PRESERVE_HOTBAR_ORDER, PermissionDefault.OP);
+
   static void registerAll() {
-    Stream.of(DEFAULT, PREMIUM, MODERATOR, DEVELOPER, ALL).forEachOrdered(Permissions::register);
+    Stream.of(DEFAULT, PREMIUM, MODERATOR, DEVELOPER, ALL, PRESERVE_HOTBAR_ORDER_PERMISSION)
+        .forEachOrdered(Permissions::register);
   }
 
   static Permission register(Permission permission) {

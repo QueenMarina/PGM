@@ -12,7 +12,11 @@ import com.google.common.collect.Collections2;
 import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.Table;
 import com.google.common.collect.Tables;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.IOException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -23,11 +27,15 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Material;
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -75,6 +83,7 @@ import tc.oc.pgm.stats.menu.items.TeamStatsMenuItem;
 import tc.oc.pgm.stats.menu.items.VerboseStatsMenuItem;
 import tc.oc.pgm.teams.Team;
 import tc.oc.pgm.tracker.TrackerMatchModule;
+import tc.oc.pgm.tracker.Trackers;
 import tc.oc.pgm.tracker.info.ProjectileInfo;
 import tc.oc.pgm.util.named.NameStyle;
 import tc.oc.pgm.util.text.TextFormatter;
@@ -85,6 +94,37 @@ import tc.oc.pgm.wool.PlayerWoolPlaceEvent;
 @ListenerScope(MatchScope.LOADED)
 public class StatsMatchModule implements MatchModule, Listener {
   private static final Component HEART_SYMBOL = text("\u2764"); // ❤
+  private static final Object CSV_LOCK = new Object();
+  private static final String[] CSV_HEADER = {
+      "ended_at",
+      "match_id",
+      "map_id",
+      "map_name",
+      "player_uuid",
+      "player_name",
+      "team_id",
+      "team_name",
+      "time_played_seconds",
+      "kills",
+      "deaths",
+      "assists",
+      "killstreak_max",
+      "longest_bow_shot_blocks",
+      "damage_done",
+      "damage_taken",
+      "bow_damage",
+      "bow_damage_taken",
+      "shots_taken",
+      "shots_hit",
+      "destroyable_pieces_broken",
+      "monuments_destroyed",
+      "flags_captured",
+      "flag_pickups",
+      "cores_leaked",
+      "wools_captured",
+      "wools_touched",
+      "longest_flag_hold_seconds"
+  };
 
   private static final String BOW_KEY = "bow";
   private static final MetadataValue TRUE = new FixedMetadataValue(PGM.get(), true);
@@ -101,6 +141,7 @@ public class StatsMatchModule implements MatchModule, Listener {
   private final int verboseItemSlot = PGM.get().getConfiguration().getVerboseItemSlot();
 
   private List<MenuItem> teams;
+  private boolean csvExported;
 
   public StatsMatchModule(Match match, List<StatType.OfFormula> formulaStats) {
     this.match = match;
@@ -151,8 +192,8 @@ public class StatsMatchModule implements MatchModule, Listener {
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onDamage(EntityDamageByEntityEvent event) {
-    ParticipantState damager =
-        match.needModule(TrackerMatchModule.class).getOwner(event.getDamager());
+    TrackerMatchModule tracker = match.needModule(TrackerMatchModule.class);
+    ParticipantState damager = tracker.getOwner(event.getDamager());
     ParticipantState damaged = match.getParticipantState(event.getEntity());
 
     // Prevent tracking damage to entities or self
@@ -167,6 +208,16 @@ public class StatsMatchModule implements MatchModule, Listener {
 
     if (damager != null) getPlayerStat(damager).onDamage(realFinalDamage, bow);
     getPlayerStat(damaged).onDamaged(realFinalDamage, bow);
+
+    // LONGEST_BOW_SHOT is intended to be "longest bow hit", not "longest bow kill".
+    if (bow && damager != null && event.getEntity() instanceof Player) {
+      var info = tracker.resolveDamage(event);
+      if (info instanceof tc.oc.pgm.api.tracker.info.RangedInfo ranged) {
+        double distance =
+            Trackers.distanceFromRanged(ranged, ((Player) event.getEntity()).getLocation());
+        if (!Double.isNaN(distance)) getPlayerStat(damager).setLongestBowKill(distance);
+      }
+    }
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -265,6 +316,11 @@ public class StatsMatchModule implements MatchModule, Listener {
 
   @EventHandler(priority = EventPriority.MONITOR)
   public void onMatchEnd(MatchFinishEvent event) {
+    if (!csvExported) {
+      csvExported = true;
+      exportMatchStatsCsv(Instant.now());
+    }
+
     if (allPlayerStats.isEmpty() || showAfter.isNegative()) return;
 
     // Try to ensure that usernames for all relevant offline players will be loaded in the cache
@@ -283,6 +339,119 @@ public class StatsMatchModule implements MatchModule, Listener {
             () -> match.callEvent(new MatchStatsEvent(match, bestStats, ownStats)),
             showAfter.toMillis(),
             TimeUnit.MILLISECONDS);
+  }
+
+  private void exportMatchStatsCsv(Instant endedAt) {
+    if (allPlayerStats.isEmpty()) return;
+
+    final String endedAtIso = endedAt.toString();
+    final String matchId = match.getId();
+    final String mapId = match.getMap().getId();
+    final String mapName = match.getMap().getName();
+
+    // Snapshot everything we need on the main thread, then do file IO async.
+    final List<String[]> rows = new ArrayList<>(allPlayerStats.size());
+    allPlayerStats.forEach((uuid, stat) -> {
+      String playerName = null;
+      MatchPlayer mp = match.getPlayer(uuid);
+      if (mp != null && mp.getBukkit() != null) {
+        playerName = mp.getBukkit().getName();
+      }
+      if (playerName == null) {
+        var username = PGM.get().getDatastore().getUsername(uuid);
+        playerName = username == null ? null : username.getNameLegacy();
+      }
+      if (playerName == null) playerName = "";
+
+      Team primary = getPrimaryTeam(uuid, true);
+      String teamId = primary == null ? "" : primary.getId();
+      String teamName = primary == null ? "" : primary.getNameLegacy();
+
+      rows.add(new String[] {
+          endedAtIso,
+          matchId,
+          mapId,
+          mapName,
+          uuid.toString(),
+          playerName,
+          teamId,
+          teamName,
+          String.valueOf(stat.getTimePlayed().toMillis() / 1000.0d),
+          String.valueOf(stat.getKills()),
+          String.valueOf(stat.getDeaths()),
+          String.valueOf(stat.getAssists()),
+          String.valueOf(stat.getMaxKillstreak()),
+          String.valueOf(stat.getLongestBowKill()),
+          String.valueOf(stat.getDamageDone()),
+          String.valueOf(stat.getDamageTaken()),
+          String.valueOf(stat.getBowDamage()),
+          String.valueOf(stat.getBowDamageTaken()),
+          String.valueOf(stat.getShotsTaken()),
+          String.valueOf(stat.getShotsHit()),
+          String.valueOf(stat.getDestroyablePiecesBroken()),
+          String.valueOf(stat.getMonumentsDestroyed()),
+          String.valueOf(stat.getFlagsCaptured()),
+          String.valueOf(stat.getFlagPickups()),
+          String.valueOf(stat.getCoresLeaked()),
+          String.valueOf(stat.getWoolsCaptured()),
+          String.valueOf(stat.getWoolsTouched()),
+          String.valueOf(stat.getLongestFlagHold().toMillis() / 1000.0d)
+      });
+    });
+
+    Bukkit.getScheduler().runTaskAsynchronously(PGM.get(), () -> appendRowsToCsv(rows));
+  }
+
+  private void appendRowsToCsv(List<String[]> rows) {
+    if (rows.isEmpty()) return;
+
+    final File outFile = new File(PGM.get().getDataFolder(), "match-stats.csv");
+    outFile.getParentFile().mkdirs();
+
+    synchronized (CSV_LOCK) {
+      final boolean needsHeader = !outFile.exists() || outFile.length() == 0;
+      try (BufferedWriter writer =
+          Files.newBufferedWriter(
+              outFile.toPath(),
+              StandardCharsets.UTF_8,
+              StandardOpenOption.CREATE,
+              StandardOpenOption.WRITE,
+              StandardOpenOption.APPEND)) {
+        if (needsHeader) {
+          writer.write(String.join(",", CSV_HEADER));
+          writer.newLine();
+        }
+        for (String[] row : rows) {
+          writer.write(toCsvLine(row));
+          writer.newLine();
+        }
+      } catch (IOException e) {
+        match.getLogger().log(java.util.logging.Level.WARNING, "Failed to write match stats CSV", e);
+      }
+    }
+  }
+
+  private static String toCsvLine(String[] cols) {
+    StringBuilder sb = new StringBuilder();
+    for (int i = 0; i < cols.length; i++) {
+      if (i > 0) sb.append(',');
+      sb.append(escapeCsv(cols[i]));
+    }
+    return sb.toString();
+  }
+
+  private static String escapeCsv(String value) {
+    if (value == null) return "";
+    boolean needsQuotes = false;
+    for (int i = 0; i < value.length(); i++) {
+      char c = value.charAt(i);
+      if (c == '"' || c == ',' || c == '\n' || c == '\r') {
+        needsQuotes = true;
+        break;
+      }
+    }
+    if (!needsQuotes) return value;
+    return "\"" + value.replace("\"", "\"\"") + "\"";
   }
 
   @EventHandler(ignoreCancelled = true)

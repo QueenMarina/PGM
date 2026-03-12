@@ -47,7 +47,8 @@ public abstract class BaseState implements Runnable, State {
   protected BaseState(Flag flag, Post post) {
     this.flag = flag;
     this.post = post;
-    this.enterTime = Instant.now();
+    // Use match time so "paused" time does not count.
+    this.enterTime = flag.getMatch().getTick().instant;
   }
 
   @Override
@@ -150,6 +151,7 @@ public abstract class BaseState implements Runnable, State {
 
   @Override
   public void run() {
+    if (this.flag.getMatch().getClock().isPaused()) return;
     this.tickLoaded();
     if (this.flag.getMatch().isRunning()) this.tickRunning();
   }

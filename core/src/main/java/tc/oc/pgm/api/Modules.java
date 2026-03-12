@@ -70,6 +70,7 @@ import tc.oc.pgm.loot.LootableMatchModule;
 import tc.oc.pgm.loot.LootableModule;
 import tc.oc.pgm.modes.ObjectiveModesMatchModule;
 import tc.oc.pgm.modes.ObjectiveModesModule;
+import tc.oc.pgm.pause.PauseMatchModule;
 import tc.oc.pgm.modules.ArrowRemovalMatchModule;
 import tc.oc.pgm.modules.DiscardPotionBottlesMatchModule;
 import tc.oc.pgm.modules.DiscardPotionBottlesModule;
@@ -106,6 +107,8 @@ import tc.oc.pgm.proximity.ProximityAlarmMatchModule;
 import tc.oc.pgm.proximity.ProximityAlarmModule;
 import tc.oc.pgm.rage.RageMatchModule;
 import tc.oc.pgm.rage.RageModule;
+import tc.oc.pgm.raindrops.RaindropsMatchModule;
+import tc.oc.pgm.hotbar.HotbarLayoutMatchModule;
 import tc.oc.pgm.regions.RegionMatchModule;
 import tc.oc.pgm.regions.RegionModule;
 import tc.oc.pgm.renewable.RenewableMatchModule;
@@ -218,6 +221,9 @@ public final class Modules {
   void registerAll() {
     // MatchModules that are always created
     register(EventFilterMatchModule.class, EventFilterMatchModule::new);
+    register(PauseMatchModule.class, PauseMatchModule::new);
+    register(RaindropsMatchModule.class, RaindropsMatchModule::new);
+    register(HotbarLayoutMatchModule.class, HotbarLayoutMatchModule::new);
     register(MultiTradeMatchModule.class, MultiTradeMatchModule::new);
     register(DeathMessageMatchModule.class, DeathMessageMatchModule::new);
     register(TrackerMatchModule.class, TrackerMatchModule::new);

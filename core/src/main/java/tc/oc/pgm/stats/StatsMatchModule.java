@@ -95,6 +95,7 @@ import tc.oc.pgm.wool.PlayerWoolPlaceEvent;
 public class StatsMatchModule implements MatchModule, Listener {
   private static final Component HEART_SYMBOL = text("\u2764"); // ❤
   private static final Object CSV_LOCK = new Object();
+  private static volatile boolean csvSavingEnabled = true;
   private static final String[] CSV_HEADER = {
       "ended_at",
       "match_id",
@@ -150,6 +151,14 @@ public class StatsMatchModule implements MatchModule, Listener {
 
   public Map<UUID, PlayerStats> getStats() {
     return Collections.unmodifiableMap(allPlayerStats);
+  }
+
+  public static boolean isCsvSavingEnabled() {
+    return csvSavingEnabled;
+  }
+
+  public static void setCsvSavingEnabled(boolean enabled) {
+    csvSavingEnabled = enabled;
   }
 
   public Table<Team, UUID, PlayerStats> getParticipationStats() {
@@ -318,7 +327,9 @@ public class StatsMatchModule implements MatchModule, Listener {
   public void onMatchEnd(MatchFinishEvent event) {
     if (!csvExported) {
       csvExported = true;
-      exportMatchStatsCsv(Instant.now());
+      if (isCsvSavingEnabled()) {
+        exportMatchStatsCsv(Instant.now());
+      }
     }
 
     if (allPlayerStats.isEmpty() || showAfter.isNegative()) return;

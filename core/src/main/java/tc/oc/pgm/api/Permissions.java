@@ -40,6 +40,7 @@ public interface Permissions {
   String PAUSE = ROOT + ".pause"; // Access to /pause and /resume
   String PRESERVE_HOTBAR_ORDER =
       ROOT + ".preservehotbarorder"; // Access to global /preservehotbarorder enable|disable
+  String STATS_TOGGLE = ROOT + ".stats.toggle"; // Access to /stats toggle on|off
   String RANK = ROOT + ".rank"; // Access to /rank (custom rank decorators)
   String VANISH = ROOT + ".vanish"; // Access to /vanish command
   String VIEW_INVENTORY =
@@ -90,6 +91,7 @@ public interface Permissions {
           .put(BAN, true)
           .put(FREEZE, true)
           .put(PAUSE, true)
+          .put(STATS_TOGGLE, true)
           .put(RANK, true)
           .put(VANISH, true)
           .build());

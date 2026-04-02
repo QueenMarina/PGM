@@ -1,13 +1,17 @@
 package tc.oc.pgm.command;
 
+import static net.kyori.adventure.text.Component.text;
 import static net.kyori.adventure.text.Component.translatable;
 import static tc.oc.pgm.util.text.TextException.exception;
 
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.command.CommandSender;
+import org.incendo.cloud.annotations.Argument;
 import org.incendo.cloud.annotations.Command;
 import org.incendo.cloud.annotations.CommandDescription;
+import org.incendo.cloud.annotations.Permission;
 import tc.oc.pgm.api.PGM;
+import tc.oc.pgm.api.Permissions;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.player.MatchPlayer;
 import tc.oc.pgm.api.setting.SettingKey;
@@ -18,6 +22,27 @@ import tc.oc.pgm.util.Audience;
 import tc.oc.pgm.util.text.TextFormatter;
 
 public final class StatsCommand {
+
+  @Command("stats toggle <state>")
+  @CommandDescription("Enable or disable saving match stats to CSV")
+  @Permission(Permissions.STATS_TOGGLE)
+  public void toggleCsvSaving(
+      Audience audience, CommandSender sender, @Argument("state") String state) {
+    final boolean enabled;
+    if (state.equalsIgnoreCase("on") || state.equalsIgnoreCase("true")) {
+      enabled = true;
+    } else if (state.equalsIgnoreCase("off") || state.equalsIgnoreCase("false")) {
+      enabled = false;
+    } else {
+      audience.sendWarning(text("Usage: /stats toggle on|off", NamedTextColor.RED));
+      return;
+    }
+
+    StatsMatchModule.setCsvSavingEnabled(enabled);
+    audience.sendMessage(
+        text("Match stats CSV saving: ", NamedTextColor.GRAY)
+            .append(text(enabled ? "ON" : "OFF", enabled ? NamedTextColor.GREEN : NamedTextColor.RED)));
+  }
 
   @Command("stats")
   @CommandDescription("Show your stats for the match")
